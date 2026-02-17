@@ -5,6 +5,7 @@ import org.jboss.jandex.DotName;
 import org.jboss.jandex.IndexView;
 
 import io.quarkiverse.dapr.deployment.items.WorkflowItemBuildItem;
+import io.quarkus.arc.deployment.AdditionalBeanBuildItem;
 import io.quarkus.deployment.annotations.BuildProducer;
 import io.quarkus.deployment.annotations.BuildStep;
 import io.quarkus.deployment.builditem.CombinedIndexBuildItem;
@@ -24,6 +25,11 @@ import io.quarkus.deployment.builditem.IndexDependencyBuildItem;
  *       classes, and produce {@link WorkflowItemBuildItem} instances that the existing
  *       {@code DaprWorkflowProcessor} build steps consume to register with the Dapr
  *       workflow runtime.</li>
+ *   <li>Produce {@link AdditionalBeanBuildItem} instances so Arc explicitly discovers
+ *       our Workflow and WorkflowActivity classes as CDI beans. This is required because
+ *       {@code IndexDependencyBuildItem} alone does not guarantee Arc bean discovery,
+ *       and the recorder needs {@code Arc.container().instance(clazz).get()} to return
+ *       non-null instances when registering workflow factories.</li>
  * </ol>
  */
 public class DaprAgenticProcessor {
@@ -80,6 +86,29 @@ public class DaprAgenticProcessor {
             if (classInfo != null) {
                 workflowItems.produce(new WorkflowItemBuildItem(classInfo, WorkflowItemBuildItem.Type.WORKFLOW_ACTIVITY));
             }
+        }
+    }
+
+    /**
+     * Explicitly register our Workflow and WorkflowActivity classes as CDI beans.
+     * <p>
+     * {@code DaprWorkflowProcessor.searchWorkflows()} uses {@code ApplicationIndexBuildItem}
+     * which only contains application classes. Our extension classes are not in the application
+     * index, so the upstream {@code keepWorkflowAndActivities()} build step (which only
+     * produces {@code UnremovableBeanBuildItem}) has no effect if Arc never discovered the
+     * beans in the first place.
+     * <p>
+     * This build step ensures Arc discovers our classes as CDI beans so that
+     * {@code WorkflowRuntimeBuilderRecorder.build()} can resolve them via
+     * {@code Arc.container().instance(clazz)} when registering workflow factories.
+     */
+    @BuildStep
+    void registerAdditionalBeans(BuildProducer<AdditionalBeanBuildItem> additionalBeans) {
+        for (String className : WORKFLOW_CLASSES) {
+            additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(className));
+        }
+        for (String className : ACTIVITY_CLASSES) {
+            additionalBeans.produce(AdditionalBeanBuildItem.unremovableOf(className));
         }
     }
 }
