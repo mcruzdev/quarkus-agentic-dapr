@@ -115,7 +115,7 @@ class DaprWorkflowPlannerTest {
 
     @Test
     void executeAgentShouldQueueAndReturnFuture() {
-        CompletableFuture<Void> future = planner.executeAgent(agent1);
+        CompletableFuture<Void> future = planner.executeAgent(agent1, null);
         assertThat(future).isNotNull();
         assertThat(future.isDone()).isFalse();
 
@@ -127,7 +127,7 @@ class DaprWorkflowPlannerTest {
     @Test
     void signalWorkflowCompleteShouldPostSentinel() throws Exception {
         // Pre-load an agent exchange + a completion sentinel
-        planner.executeAgent(agent1);
+        planner.executeAgent(agent1, null);
         planner.signalWorkflowComplete();
 
         // The planner should be able to drain both: first the agent, then the sentinel
@@ -185,11 +185,11 @@ class DaprWorkflowPlannerTest {
         CountDownLatch latch = new CountDownLatch(2);
 
         Thread t1 = new Thread(() -> {
-            planner.executeAgent(agent1);
+            planner.executeAgent(agent1, null);
             latch.countDown();
         });
         Thread t2 = new Thread(() -> {
-            planner.executeAgent(agent2);
+            planner.executeAgent(agent2, null);
             latch.countDown();
         });
 

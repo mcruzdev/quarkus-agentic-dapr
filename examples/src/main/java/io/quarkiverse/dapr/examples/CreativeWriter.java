@@ -3,6 +3,7 @@ package io.quarkiverse.dapr.examples;
 import dev.langchain4j.agentic.Agent;
 import dev.langchain4j.service.UserMessage;
 import dev.langchain4j.service.V;
+import io.quarkiverse.langchain4j.ToolBox;
 
 /**
  * Sub-agent that generates a creative story draft based on a given topic.

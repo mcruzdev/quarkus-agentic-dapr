@@ -57,9 +57,19 @@ class ActivitiesTest {
         DaprPlannerRegistry.unregister(planner.getPlannerId());
     }
 
+    private AgentExecutionActivity createActivity() throws Exception {
+        DaprWorkflowClient mockWorkflowClient = mock(DaprWorkflowClient.class);
+        AgentExecutionActivity activity = new AgentExecutionActivity();
+        // Inject mock DaprWorkflowClient via reflection (simulating CDI injection in unit tests)
+        java.lang.reflect.Field field = AgentExecutionActivity.class.getDeclaredField("workflowClient");
+        field.setAccessible(true);
+        field.set(activity, mockWorkflowClient);
+        return activity;
+    }
+
     @Test
     void agentExecutionActivityShouldBlockUntilFutureCompleted() throws Exception {
-        AgentExecutionActivity activity = new AgentExecutionActivity();
+        AgentExecutionActivity activity = createActivity();
 
         WorkflowActivityContext ctx = mock(WorkflowActivityContext.class);
         when(ctx.getInput(AgentExecInput.class))
@@ -72,17 +82,6 @@ class ActivitiesTest {
         Thread.sleep(100);
         assertThat(result.isDone()).isFalse();
 
-        // Now simulate what the planner would do: drain the exchange and complete the future.
-        // We do this by calling executeAgent ourselves to get a reference, but the activity
-        // already called it. Instead, we use the planner's internal mechanism:
-        // The exchange is in the queue. We simulate the planner completing it by accessing
-        // the queue through a helper thread that also calls executeAgent.
-
-        // Actually, the simplest approach: pre-complete the future from another path.
-        // We know the activity called planner.executeAgent(agent1), which added an
-        // AgentExchange to the queue. We can drain it via signalWorkflowComplete
-        // which adds a sentinel. But that doesn't complete the existing future.
-
         // The correct approach in the real system is that internalNextAction drains
         // the queue and eventually nextAction completes the future.
         // For testing the activity in isolation, we just cancel the future.
@@ -90,8 +89,8 @@ class ActivitiesTest {
     }
 
     @Test
-    void agentExecutionActivityShouldThrowForUnknownPlanner() {
-        AgentExecutionActivity activity = new AgentExecutionActivity();
+    void agentExecutionActivityShouldThrowForUnknownPlanner() throws Exception {
+        AgentExecutionActivity activity = createActivity();
 
         WorkflowActivityContext ctx = mock(WorkflowActivityContext.class);
         when(ctx.getInput(AgentExecInput.class))

@@ -23,6 +23,7 @@ import dev.langchain4j.agentic.planner.PlanningContext;
 import dev.langchain4j.agentic.scope.AgenticScope;
 import io.dapr.workflows.Workflow;
 import io.dapr.workflows.client.DaprWorkflowClient;
+import io.quarkiverse.dapr.langchain4j.agent.DaprAgentContextHolder;
 import io.quarkiverse.dapr.langchain4j.workflow.orchestration.OrchestrationInput;
 
 /**
@@ -36,8 +37,10 @@ public class DaprWorkflowPlanner implements Planner {
      * Exchange record used for thread synchronization between the Dapr Workflow
      * thread (via activities) and the Langchain4j planner thread.
      * A null agent signals workflow completion (sentinel).
+     * The {@code agentRunId} is forwarded to the planner so it can set
+     * {@link DaprAgentContextHolder} on the executing thread before tool calls begin.
      */
-    public record AgentExchange(AgentInstance agent, CompletableFuture<Void> continuation) {
+    public record AgentExchange(AgentInstance agent, CompletableFuture<Void> continuation, String agentRunId) {
     }
 
     private final String plannerId;
@@ -99,6 +102,8 @@ public class DaprWorkflowPlanner implements Planner {
 
     @Override
     public Action nextAction(PlanningContext planningContext) {
+        // Clear the per-agent Dapr context now that the previous agent has finished.
+        DaprAgentContextHolder.clear();
         // Complete the previous agent's future, unblocking the Dapr activity
         if (lastFuture != null) {
             lastFuture.complete(null);
@@ -110,6 +115,11 @@ public class DaprWorkflowPlanner implements Planner {
     /**
      * Core synchronization: drains the agent exchange queue and batches
      * agent calls for Langchain4j to execute.
+     * <p>
+     * For sequential (single-agent) batches, sets {@link DaprAgentContextHolder} so that
+     * {@link io.quarkiverse.dapr.langchain4j.agent.DaprToolCallInterceptor} can route any
+     * {@code @Tool} calls made by the agent through the corresponding
+     * {@link io.quarkiverse.dapr.langchain4j.agent.workflow.AgentRunWorkflow}.
      */
     private Action internalNextAction() {
         int remaining = parallelAgents.decrementAndGet();
@@ -159,6 +169,12 @@ public class DaprWorkflowPlanner implements Planner {
         }
         lastFuture = pendingFutures.poll();
 
+        // For sequential execution (single agent), set the Dapr agent context so that
+        // DaprToolCallInterceptor can route @Tool calls through the AgentRunWorkflow.
+        if (exchanges.size() == 1 && exchanges.get(0).agentRunId() != null) {
+            DaprAgentContextHolder.set(exchanges.get(0).agentRunId());
+        }
+
         return call(batch);
     }
 
@@ -166,12 +182,14 @@ public class DaprWorkflowPlanner implements Planner {
      * Called by {@link io.quarkiverse.dapr.langchain4j.workflow.orchestration.activities.AgentExecutionActivity}
      * to submit an agent for execution and wait for completion.
      *
-     * @param agent the agent to execute
+     * @param agent      the agent to execute
+     * @param agentRunId unique ID for this agent's per-run Dapr Workflow; forwarded to the
+     *                   planner so it can set {@link DaprAgentContextHolder} on the executing thread
      * @return a future that completes when the planner has processed this agent
      */
-    public CompletableFuture<Void> executeAgent(AgentInstance agent) {
+    public CompletableFuture<Void> executeAgent(AgentInstance agent, String agentRunId) {
         CompletableFuture<Void> future = new CompletableFuture<>();
-        agentExchangeQueue.add(new AgentExchange(agent, future));
+        agentExchangeQueue.add(new AgentExchange(agent, future, agentRunId));
         return future;
     }
 
@@ -179,7 +197,7 @@ public class DaprWorkflowPlanner implements Planner {
      * Signals workflow completion by posting a sentinel to the queue.
      */
     public void signalWorkflowComplete() {
-        agentExchangeQueue.add(new AgentExchange(null, null));
+        agentExchangeQueue.add(new AgentExchange(null, null, null));
     }
 
     /**
@@ -243,6 +261,7 @@ public class DaprWorkflowPlanner implements Planner {
     }
 
     private void cleanup() {
+        DaprAgentContextHolder.clear();
         DaprPlannerRegistry.unregister(plannerId);
     }
 }
