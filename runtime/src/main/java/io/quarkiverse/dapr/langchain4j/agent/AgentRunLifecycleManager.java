@@ -79,20 +79,41 @@ public class AgentRunLifecycleManager {
     }
 
     /**
-     * Called when the CDI request scope is destroyed. Signals the running
-     * {@link AgentRunWorkflow} that the agent has finished, allowing it to terminate cleanly.
+     * Signals the active {@link AgentRunWorkflow} that the {@code @Agent} method has finished,
+     * then unregisters the run and clears the context holder.
+     * <p>
+     * Called directly by the <em>generated CDI decorator</em> when the {@code @Agent} method
+     * exits (successfully or via exception). Setting {@code agentRunId} to {@code null} afterward
+     * makes {@link #cleanup()} a no-op, preventing a duplicate {@code "done"} event.
+     * <p>
+     * When no decorator was generated (e.g., the lazy-activation fallback path used by
+     * {@link DaprChatModelDecorator}), this method is called by {@link #cleanup()} when the
+     * CDI request scope ends.
      */
-    @PreDestroy
-    void cleanup() {
+    public void triggerDone() {
         if (agentRunId != null) {
-            LOG.infof("[AgentRun:%s] Request scope ending — sending done event to AgentRunWorkflow", agentRunId);
+            LOG.infof("[AgentRun:%s] @Agent method exited — sending done event to AgentRunWorkflow", agentRunId);
             try {
                 workflowClient.raiseEvent(agentRunId, "agent-event",
                         new AgentEvent("done", null, null, null));
             } finally {
                 DaprAgentRunRegistry.unregister(agentRunId);
                 DaprAgentContextHolder.clear();
+                agentRunId = null; // prevents @PreDestroy from firing a second time
             }
         }
+    }
+
+    /**
+     * Safety-net called when the CDI request scope is destroyed.
+     * <p>
+     * In the normal flow the generated CDI decorator already called {@link #triggerDone()},
+     * so {@code agentRunId} is {@code null} and this method is a no-op. It only fires the
+     * {@code "done"} event when the lazy-activation fallback path was used (i.e., no decorator
+     * was present for this {@code @Agent} interface).
+     */
+    @PreDestroy
+    void cleanup() {
+        triggerDone();
     }
 }

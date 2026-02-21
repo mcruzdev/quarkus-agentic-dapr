@@ -28,6 +28,10 @@
             <artifactId>quarkus-arc-deployment</artifactId>
         </dependency>
         <dependency>
+            <groupId>io.quarkus.gizmo</groupId>
+            <artifactId>gizmo</artifactId>
+        </dependency>
+        <dependency>
             <groupId>io.quarkiverse.dapr</groupId>
             <artifactId>quarkus-agentic-dapr</artifactId>
             <version>${project.version}</version>
