@@ -18,13 +18,17 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import dev.langchain4j.agentic.Agent;
 import dev.langchain4j.agentic.planner.Action;
 import dev.langchain4j.agentic.planner.AgentInstance;
 import dev.langchain4j.agentic.planner.AgenticSystemTopology;
 import dev.langchain4j.agentic.planner.InitPlanningContext;
 import dev.langchain4j.agentic.planner.PlanningContext;
 import dev.langchain4j.agentic.scope.AgenticScope;
+import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
 import io.dapr.workflows.client.DaprWorkflowClient;
+import io.quarkiverse.dapr.langchain4j.workflow.DaprWorkflowPlanner.AgentMetadata;
 import io.quarkiverse.dapr.langchain4j.workflow.orchestration.SequentialOrchestrationWorkflow;
 
 class DaprWorkflowPlannerTest {
@@ -197,5 +201,91 @@ class DaprWorkflowPlannerTest {
         t2.start();
 
         assertThat(latch.await(5, TimeUnit.SECONDS)).isTrue();
+    }
+
+    // --- Test interfaces for getAgentMetadata() ---
+
+    interface AnnotatedAgent {
+        @Agent(name = "annotated")
+        @SystemMessage("You are a helpful assistant")
+        @UserMessage("Please help with: {{it}}")
+        String chat(String input);
+    }
+
+    interface AgentWithoutMessages {
+        @Agent(name = "no-messages")
+        String chat(String input);
+    }
+
+    interface AgentWithSystemOnly {
+        @Agent(name = "system-only")
+        @SystemMessage("System prompt here")
+        String chat(String input);
+    }
+
+    // --- Tests for getAgentMetadata() ---
+
+    @Test
+    void getAgentMetadataShouldExtractAnnotations() {
+        AgentInstance agent = mock(AgentInstance.class);
+        when(agent.name()).thenReturn("annotated");
+        when(agent.type()).thenReturn((Class) AnnotatedAgent.class);
+
+        InitPlanningContext ctx = new InitPlanningContext(scope, mock(AgentInstance.class), List.of(agent));
+        planner.init(ctx);
+
+        AgentMetadata metadata = planner.getAgentMetadata(0);
+
+        assertThat(metadata.agentName()).isEqualTo("annotated");
+        assertThat(metadata.systemMessage()).isEqualTo("You are a helpful assistant");
+        assertThat(metadata.userMessage()).isEqualTo("Please help with: {{it}}");
+    }
+
+    @Test
+    void getAgentMetadataShouldReturnNullMessagesWhenNotAnnotated() {
+        AgentInstance agent = mock(AgentInstance.class);
+        when(agent.name()).thenReturn("no-messages");
+        when(agent.type()).thenReturn((Class) AgentWithoutMessages.class);
+
+        InitPlanningContext ctx = new InitPlanningContext(scope, mock(AgentInstance.class), List.of(agent));
+        planner.init(ctx);
+
+        AgentMetadata metadata = planner.getAgentMetadata(0);
+
+        assertThat(metadata.agentName()).isEqualTo("no-messages");
+        assertThat(metadata.systemMessage()).isNull();
+        assertThat(metadata.userMessage()).isNull();
+    }
+
+    @Test
+    void getAgentMetadataShouldExtractSystemMessageOnly() {
+        AgentInstance agent = mock(AgentInstance.class);
+        when(agent.name()).thenReturn("system-only");
+        when(agent.type()).thenReturn((Class) AgentWithSystemOnly.class);
+
+        InitPlanningContext ctx = new InitPlanningContext(scope, mock(AgentInstance.class), List.of(agent));
+        planner.init(ctx);
+
+        AgentMetadata metadata = planner.getAgentMetadata(0);
+
+        assertThat(metadata.agentName()).isEqualTo("system-only");
+        assertThat(metadata.systemMessage()).isEqualTo("System prompt here");
+        assertThat(metadata.userMessage()).isNull();
+    }
+
+    @Test
+    void getAgentMetadataShouldHandleNullType() {
+        AgentInstance agent = mock(AgentInstance.class);
+        when(agent.name()).thenReturn("null-type");
+        when(agent.type()).thenReturn(null);
+
+        InitPlanningContext ctx = new InitPlanningContext(scope, mock(AgentInstance.class), List.of(agent));
+        planner.init(ctx);
+
+        AgentMetadata metadata = planner.getAgentMetadata(0);
+
+        assertThat(metadata.agentName()).isEqualTo("null-type");
+        assertThat(metadata.systemMessage()).isNull();
+        assertThat(metadata.userMessage()).isNull();
     }
 }

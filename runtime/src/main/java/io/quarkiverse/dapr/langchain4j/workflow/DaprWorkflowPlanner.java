@@ -1,5 +1,6 @@
 package io.quarkiverse.dapr.langchain4j.workflow;
 
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -14,6 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.function.Predicate;
 
+import org.jboss.logging.Logger;
+
+import dev.langchain4j.agentic.Agent;
 import dev.langchain4j.agentic.planner.Action;
 import dev.langchain4j.agentic.planner.AgentInstance;
 import dev.langchain4j.agentic.planner.AgenticSystemTopology;
@@ -21,6 +25,8 @@ import dev.langchain4j.agentic.planner.InitPlanningContext;
 import dev.langchain4j.agentic.planner.Planner;
 import dev.langchain4j.agentic.planner.PlanningContext;
 import dev.langchain4j.agentic.scope.AgenticScope;
+import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
 import io.dapr.workflows.Workflow;
 import io.dapr.workflows.client.DaprWorkflowClient;
 import io.quarkiverse.dapr.langchain4j.agent.DaprAgentContextHolder;
@@ -32,6 +38,19 @@ import io.quarkiverse.dapr.langchain4j.workflow.orchestration.OrchestrationInput
  * to coordinate between Dapr Workflow execution and Langchain4j's agent planning loop.
  */
 public class DaprWorkflowPlanner implements Planner {
+
+    private static final Logger LOG = Logger.getLogger(DaprWorkflowPlanner.class);
+
+    /**
+     * Metadata extracted from an {@link AgentInstance} for propagation to
+     * the per-agent {@link io.quarkiverse.dapr.langchain4j.agent.workflow.AgentRunWorkflow}.
+     *
+     * @param agentName      human-readable name from {@code @Agent(name)} or the instance name
+     * @param userMessage    the {@code @UserMessage} template text, or {@code null} if not annotated
+     * @param systemMessage  the {@code @SystemMessage} template text, or {@code null} if not annotated
+     */
+    public record AgentMetadata(String agentName, String userMessage, String systemMessage) {
+    }
 
     /**
      * Exchange record used for thread synchronization between the Dapr Workflow
@@ -205,6 +224,45 @@ public class DaprWorkflowPlanner implements Planner {
      */
     public AgentInstance getAgent(int index) {
         return agents.get(index);
+    }
+
+    /**
+     * Extracts metadata (name, user message template, system message template) from
+     * the {@link AgentInstance} at the given index.
+     * <p>
+     * The system and user message templates are extracted via reflection on the
+     * {@code @Agent}-annotated methods of {@link AgentInstance#type()}. If no annotated
+     * method is found, or the agent type is not reflectable, the messages will be {@code null}.
+     */
+    public AgentMetadata getAgentMetadata(int index) {
+        AgentInstance agent = agents.get(index);
+        String agentName = agent.name();
+        String userMessage = null;
+        String systemMessage = null;
+
+        try {
+            Class<?> agentType = agent.type();
+            if (agentType != null) {
+                for (Method method : agentType.getMethods()) {
+                    if (method.isAnnotationPresent(Agent.class)) {
+                        UserMessage userAnnotation = method.getAnnotation(UserMessage.class);
+                        if (userAnnotation != null && userAnnotation.value().length > 0) {
+                            userMessage = String.join("\n", userAnnotation.value());
+                        }
+                        SystemMessage systemAnnotation = method.getAnnotation(SystemMessage.class);
+                        if (systemAnnotation != null && systemAnnotation.value().length > 0) {
+                            systemMessage = String.join("\n", systemAnnotation.value());
+                        }
+                        break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.debugf("Could not extract prompt metadata from agent type for agent=%s: %s",
+                    agentName, e.getMessage());
+        }
+
+        return new AgentMetadata(agentName, userMessage, systemMessage);
     }
 
     /**

@@ -4,7 +4,6 @@ import java.util.concurrent.CompletableFuture;
 
 import org.jboss.logging.Logger;
 
-import dev.langchain4j.agentic.planner.AgentInstance;
 import io.dapr.workflows.WorkflowActivity;
 import io.dapr.workflows.WorkflowActivityContext;
 import io.dapr.workflows.client.DaprWorkflowClient;
@@ -15,6 +14,7 @@ import io.quarkiverse.dapr.langchain4j.agent.workflow.AgentRunInput;
 import io.quarkiverse.dapr.langchain4j.agent.workflow.AgentRunWorkflow;
 import io.quarkiverse.dapr.langchain4j.workflow.DaprPlannerRegistry;
 import io.quarkiverse.dapr.langchain4j.workflow.DaprWorkflowPlanner;
+import io.quarkiverse.dapr.langchain4j.workflow.DaprWorkflowPlanner.AgentMetadata;
 import io.quarkiverse.dapr.langchain4j.workflow.orchestration.AgentExecInput;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -51,8 +51,8 @@ public class AgentExecutionActivity implements WorkflowActivity {
                     + ". Registered IDs: " + DaprPlannerRegistry.getRegisteredIds());
         }
 
-        AgentInstance agent = planner.getAgent(input.agentIndex());
-        String agentName = agent.name();
+        AgentMetadata metadata = planner.getAgentMetadata(input.agentIndex());
+        String agentName = metadata.agentName();
 
         // Create a unique ID for this specific agent execution.
         // The agentRunId must match the workflow instance ID so raiseEvent() reaches the right workflow.
@@ -65,15 +65,19 @@ public class AgentExecutionActivity implements WorkflowActivity {
         DaprAgentRunRegistry.register(agentRunId, runContext);
 
         // Start a per-agent Dapr Workflow so each tool call becomes a tracked activity.
-        // Prompt metadata is not available here (resolved later by the AiService invocation).
+        // Propagate the agent's prompt metadata (system/user message templates) extracted
+        // from the @Agent interface annotations so they are visible in the workflow history.
         workflowClient.scheduleNewWorkflow(AgentRunWorkflow.class,
-                new AgentRunInput(agentRunId, agentName, null, null), agentRunId);
-        LOG.infof("[Planner:%s] AgentRunWorkflow started for agent=%s, agentRunId=%s",
-                input.plannerId(), agentName, agentRunId);
+                new AgentRunInput(agentRunId, agentName, metadata.userMessage(), metadata.systemMessage()),
+                agentRunId);
+        LOG.infof("[Planner:%s] AgentRunWorkflow started for agent=%s, agentRunId=%s, userMessage=%s, systemMessage=%s",
+                input.plannerId(), agentName, agentRunId,
+                metadata.userMessage() != null ? "present" : "null",
+                metadata.systemMessage() != null ? "present" : "null");
 
         try {
             // Submit the agent (with its run ID) to the planner's exchange queue and block until done.
-            CompletableFuture<Void> future = planner.executeAgent(agent, agentRunId);
+            CompletableFuture<Void> future = planner.executeAgent(planner.getAgent(input.agentIndex()), agentRunId);
             future.join();
             LOG.infof("[Planner:%s] Agent execution completed — agent=%s, agentRunId=%s",
                     input.plannerId(), agentName, agentRunId);

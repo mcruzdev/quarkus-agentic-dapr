@@ -13,6 +13,7 @@
     <modules>
         <module>runtime</module>
         <module>deployment</module>
+        <module>quarkus-agentic-dapr-agents-registry</module>
         <module>examples</module>
     </modules>
 
@@ -21,9 +22,9 @@
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <quarkus.version>3.31.2</quarkus.version>
-        <dapr-sdk.version>1.17.0-rc-1</dapr-sdk.version>
-<!--        <quarkus-dapr.version>2.5.0-rc.3</quarkus-dapr.version>-->
-      <quarkus-dapr.version>999-SNAPSHOT</quarkus-dapr.version>
+        <dapr-sdk.version>1.17.0-rc-4</dapr-sdk.version>
+        <quarkus-dapr.version>2.5.0-rc.4</quarkus-dapr.version>
+<!--        <quarkus-dapr.version>999-SNAPSHOT</quarkus-dapr.version>-->
         <quarkus-langchain4j.version>1.7.1</quarkus-langchain4j.version>
     </properties>
 
